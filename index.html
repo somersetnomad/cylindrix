@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cylindrix</title>
+<meta name="description" content="Cylindrix: a falling-block puzzle game on a see-through drum. No walls, growing polyominoes, triangular-number scoring.">
+<meta property="og:title" content="Cylindrix">
+<meta property="og:description" content="A falling-block puzzle on a see-through drum. Close every ring all the way round.">
+<meta name="theme-color" content="#0f1f38" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f1f5f2" media="(prefers-color-scheme: light)">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Kalam:wght@400;700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a see-through drum drawn on graph paper, with a slim ledger beside it; on phones the ledger's top half sits above the drum and the notes go below. */
+:root {
+  --paper: #f1f5f2;
+  --paper-card: #fbfdfb;
+  --grid-minor: #dde8e6;
+  --grid-major: #c6d8da;
+  --ink: #1c2a49;
+  --ink-soft: #5a6787;
+  --red: #c23a3a;
+  --drum: #e3ecef;
+  --shade-rgb: 28, 42, 73;
+  --hi-rgb: 255, 255, 255;
+  --cell-fs: 58%; --cell-fl: 70%; --cell-ls: 55%; --cell-ll: 30%;
+  --f-display: "Major Mono Display", ui-monospace, monospace;
+  --f-hand: "Kalam", "Segoe Print", "Comic Sans MS", cursive;
+  --f-body: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1f38; --paper-card: #132848; --grid-minor: #15304f; --grid-major: #1e4068;
+    --ink: #e3ebf7; --ink-soft: #93a7c8; --red: #ff8f78; --drum: #16315a;
+    --shade-rgb: 2, 8, 22; --hi-rgb: 190, 215, 255;
+    --cell-fs: 60%; --cell-fl: 56%; --cell-ls: 85%; --cell-ll: 84%; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1f38; --paper-card: #132848; --grid-minor: #15304f; --grid-major: #1e4068;
+  --ink: #e3ebf7; --ink-soft: #93a7c8; --red: #ff8f78; --drum: #16315a;
+  --shade-rgb: 2, 8, 22; --hi-rgb: 190, 215, 255;
+  --cell-fs: 60%; --cell-fl: 56%; --cell-ls: 85%; --cell-ll: 84%; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { min-height: 100%; }
+body {
+  background-color: var(--paper); color: var(--ink);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+  background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+  font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.app { max-width: 1040px; margin: 0 auto; padding-block: 22px 48px; display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+h1 { font-family: var(--f-display); font-weight: 400; font-size: clamp(30px, 6vw, 44px); margin: 0; line-height: 1; letter-spacing: 0.03em; }
+.hand { font-family: var(--f-hand); }
+header .hand { color: var(--red); font-size: 19px; transform: rotate(-1.5deg); }
+
+.game {
+  display: grid; gap: 18px 44px; align-items: start; justify-content: center;
+  grid-template-columns: auto minmax(0, 330px);
+  grid-template-areas: "board hud" "board notes"; grid-template-rows: auto 1fr;
+}
+.hud { grid-area: hud; display: grid; gap: 16px; min-width: 0; }
+.notes { grid-area: notes; min-width: 0; }
+.board-col { grid-area: board; display: grid; gap: 10px; justify-items: center; }
+@media (max-width: 760px) {
+  .game { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hud" "board" "notes"; }
+}
+
+.board-wrap { position: relative; max-width: 100%; }
+canvas#board { display: block; touch-action: none; }
+.overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; }
+.note-card {
+  position: relative; max-width: 270px; display: grid; gap: 10px;
+  background-color: var(--paper-card);
+  background-image: linear-gradient(transparent 27px, var(--grid-major) 27px, var(--grid-major) 28px);
+  background-size: 100% 28px; background-position: 0 6px;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 255px 14px 225px 14px / 14px 225px 14px 255px;
+  padding: 16px 18px 18px 30px;
+  box-shadow: 3px 4px 0 rgba(var(--shade-rgb), 0.12);
+  transform: rotate(-0.8deg);
+}
+.note-card::before { content: ""; position: absolute; left: 18px; top: 0; bottom: 0; width: 1.5px; background: var(--red); opacity: 0.7; }
+.note-card h2 { margin: 0; font-family: var(--f-hand); font-weight: 700; font-size: 26px; line-height: 1.1; }
+.note-card p { margin: 0; font-size: 14px; color: var(--ink-soft); line-height: 28px; }
+.note-card .big { font-family: var(--f-mono); font-size: 28px; font-variant-numeric: tabular-nums; }
+.note-card .qed { font-family: var(--f-hand); color: var(--red); font-size: 18px; }
+
+button {
+  font: inherit; cursor: pointer; color: var(--ink); background: var(--paper-card);
+  border: 1.5px solid var(--ink); padding: 8px 14px;
+  border-radius: 255px 12px 225px 12px / 12px 225px 12px 255px;
+}
+button:hover { background: var(--paper); }
+button:focus-visible { outline: 2px dashed var(--red); outline-offset: 3px; }
+button.primary { background: var(--ink); color: var(--paper-card); font-weight: 700; }
+.modes { display: grid; gap: 8px; }
+.modes button { text-align: left; display: grid; gap: 0; }
+.modes button span { font-size: 12px; font-weight: 400; opacity: 0.85; line-height: 1.4; }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.toast {
+  position: absolute; left: 50%; top: 4px; transform: translateX(-50%) rotate(-2deg);
+  font-family: var(--f-hand); color: var(--red); font-size: 18px; white-space: nowrap;
+  pointer-events: none; transition: opacity .4s; background: var(--paper); padding: 0 6px;
+}
+
+.pad { display: none; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 100%; max-width: 420px; }
+.pad button { padding: 12px 0; font-family: var(--f-mono); font-size: 18px; user-select: none; -webkit-user-select: none; touch-action: none; }
+@media (hover: none), (max-width: 760px) { .pad { display: grid; } }
+
+.label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); font-weight: 700; }
+.score { display: grid; gap: 2px; }
+.score .val { font-family: var(--f-mono); font-size: clamp(30px, 5vw, 40px); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05; }
+.formula { font-family: var(--f-hand); color: var(--red); font-size: 20px; line-height: 1.25; min-height: 1.25em; }
+.formula.idle { color: var(--ink-soft); }
+.ruled { position: relative; padding-bottom: 8px; }
+.ruled > svg.rule { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 6px; color: var(--ink-soft); overflow: visible; }
+.facts { display: flex; gap: 20px; flex-wrap: wrap; align-items: end; }
+.facts div { display: grid; gap: 0; }
+.facts .num { font-family: var(--f-mono); font-size: 20px; font-variant-numeric: tabular-nums; }
+.orders { display: flex; gap: 6px; font-family: var(--f-mono); font-size: 15px; }
+.orders span { padding: 0 6px; border: 1.5px solid transparent; border-radius: 50% 45% 55% 50% / 55% 50% 50% 45%; color: var(--ink-soft); }
+.orders span.on { border-color: var(--red); color: var(--ink); }
+.queue-row { display: flex; gap: 18px; flex-wrap: wrap; }
+.queue-row section { display: grid; gap: 4px; }
+.mini-row { display: flex; gap: 6px; }
+.mini {
+  display: block; border: 1.5px solid var(--ink-soft); background: var(--paper-card);
+  border-radius: 255px 10px 225px 10px / 10px 225px 10px 255px;
+}
+#hold.used { opacity: 0.4; }
+.drift { display: grid; gap: 6px; }
+.drift-top { display: flex; justify-content: space-between; gap: 12px; font-family: var(--f-hand); font-size: 17px; }
+.meter { height: 8px; border: 1.5px solid var(--ink-soft); border-radius: 255px 6px 225px 6px / 6px 225px 6px 255px; overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--red); opacity: 0.75; }
+
+.ledger { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; font-family: var(--f-hand); font-size: 17px; }
+.ledger li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--grid-major); line-height: 28px; }
+.ledger li b { font-family: var(--f-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ledger li.empty { color: var(--ink-soft); }
+
+details.howto { margin-top: 16px; }
+details.howto summary { cursor: pointer; font-family: var(--f-hand); font-size: 20px; list-style: none; display: inline-flex; gap: 8px; align-items: center; }
+details.howto summary::-webkit-details-marker { display: none; }
+details.howto summary::before { content: "+"; font-family: var(--f-mono); color: var(--red); }
+details.howto[open] summary::before { content: "−"; }
+details.howto summary:focus-visible { outline: 2px dashed var(--red); outline-offset: 3px; }
+.howto-body { display: grid; gap: 16px; padding-top: 12px; }
+.howto-body h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+.rules { margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width: 62ch; }
+.rules li::marker { color: var(--red); }
+table { width: 100%; border-collapse: collapse; font-family: var(--f-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--grid-major); }
+th { font-family: var(--f-body); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+td:last-child, th:last-child { text-align: right; }
+kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--ink-soft); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--paper-card); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+.keys span:nth-child(odd) { white-space: nowrap; }
+.demo-bar { width: 100%; max-width: 360px; padding-bottom: 10px; border-bottom: 1.5px dashed var(--red); display: grid; gap: 6px; }
+.demo-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.demo-top button { padding: 4px 10px; font-size: 13px; }
+.demo-cap { margin: 0; font-family: var(--f-hand); font-size: 20px; line-height: 1.3; min-height: 2.6em; text-wrap: balance; }
+.demo-key { font-family: var(--f-mono); font-size: 13px; color: var(--ink-soft); min-height: 1.5em; }
+.demo-key kbd { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } .note-card { transform: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>cylindrix</h1>
+    <span class="hand">a falling-block game on a glass drum</span>
+  </header>
+
+  <div class="game">
+    <div class="hud">
+      <div class="demo-bar" id="demo-bar" hidden>
+        <div class="demo-top">
+          <span class="label" id="demo-step">Demo · step 1 of 8</span>
+          <button id="btn-stop">Stop demo</button>
+        </div>
+        <p class="demo-cap" id="demo-cap">The piece falls at the front of the drum.</p>
+        <div class="demo-key" id="demo-key" aria-hidden="true"></div>
+        <div class="meter"><i id="demo-meter"></i></div>
+      </div>
+      <div class="score ruled">
+        <span class="label">Score</span>
+        <span class="val" id="s-score">0</span>
+        <span class="formula idle" id="formula">T(k) × 100 × 1</span>
+      </div>
+      <div class="facts">
+        <div><span class="label">Rings</span><span class="num" id="s-lines">0</span></div>
+        <div><span class="label">Level</span><span class="num" id="s-level">1</span></div>
+        <div><span class="label">Order n</span><span class="orders" id="orders"><span data-o="3">3</span><span data-o="4">4</span><span data-o="5">5</span></span></div>
+      </div>
+      <div class="queue-row">
+        <section><span class="label">Hold</span><canvas id="hold" class="mini" aria-label="Held piece"></canvas></section>
+        <section><span class="label">Next</span><div class="mini-row" id="next"></div></section>
+      </div>
+      <div class="drift" id="drift-box" hidden>
+        <div class="drift-top"><span id="drift-dir">turning right</span><span id="drift-rate">every 4.0 s</span></div>
+        <div class="meter"><i id="drift-meter"></i></div>
+      </div>
+    </div>
+
+    <div class="board-col">
+      <div class="board-wrap" id="wrap">
+        <canvas id="board" aria-label="Game board: a see-through drum of 12 columns"></canvas>
+        <div class="toast" id="toast" style="opacity:0"></div>
+        <div class="overlay" id="ov-ready">
+          <div class="note-card">
+            <h2>Pick a mode</h2>
+            <p>Move and the drum turns under you. Close a ring all the way round to clear it.</p>
+            <div class="modes">
+              <button class="primary" id="btn-classic">Classic<span>The drum turns only when you move.</span></button>
+              <button id="btn-drift">Drift<span>The drum turns itself on a timer.</span></button>
+              <button id="btn-demo">Watch a 30-second demo<span>See a game played, with each rule explained.</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="overlay" id="ov-pause" hidden>
+          <div class="note-card"><h2>Paused</h2><button class="primary" id="btn-resume">Resume</button></div>
+        </div>
+        <div class="overlay" id="ov-over" hidden>
+          <div class="note-card">
+            <h2>Topped out</h2>
+            <div><span class="big" id="final">0</span> <span class="qed">∎</span></div>
+            <p id="best-line">Best: 0</p>
+            <div class="row-btns">
+              <button class="primary" id="btn-again">Play again</button>
+              <button id="btn-mode">Change mode</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pad" id="pad">
+        <button data-act="left" aria-label="Move left">←</button>
+        <button data-act="ccw" aria-label="Rotate anticlockwise">↺</button>
+        <button data-act="cw" aria-label="Rotate clockwise">↻</button>
+        <button data-act="right" aria-label="Move right">→</button>
+        <button data-act="drop" aria-label="Hard drop">⤓</button>
+        <button data-act="hold" aria-label="Hold piece" style="grid-column: span 2">hold</button>
+        <button data-act="down" aria-label="Soft drop" style="grid-column: span 3">soft drop ↓</button>
+      </div>
+    </div>
+
+    <div class="notes">
+      <div class="ruled" style="margin-bottom:6px"><span class="label">Ledger</span></div>
+      <ol class="ledger" id="ledger"><li class="empty">Clears are written here.</li></ol>
+
+      <details class="howto" id="howto">
+        <summary>How to play</summary>
+        <div class="howto-body">
+          <section>
+            <h3>Your first game</h3>
+            <ol class="rules">
+              <li>Press <kbd>←</kbd> or <kbd>→</kbd> to turn the drum until the dashed outline sits over a gap.</li>
+              <li>Press <kbd>↑</kbd> to rotate the piece so it fits the gap, then <kbd>Space</kbd> to drop it.</li>
+              <li>Keep the stack level all the way round. Gaps on the back still count, so turn the drum to check them.</li>
+              <li>If a piece doesn't fit anywhere, press <kbd>C</kbd> to hold it for later.</li>
+            </ol>
+            <p style="margin:8px 0 0"><button id="btn-demo2">Watch the demo</button></p>
+          </section>
+          <section>
+            <h3>Rules</h3>
+            <ul class="rules">
+              <li>The well is a drum of 12 columns, 30° apart. There are no walls: a ring clears only when all 12 cells are filled.</li>
+              <li>Your piece always sits at the front. Moving turns the drum. The back half shows faintly through the glass, and the red line marks the seam at column 0.</li>
+              <li>Pieces grow with you: 2 trominoes until ring 8, 7 tetrominoes until ring 30, then 18 pentominoes. A program generates every shape; each size has its own shuffled bag.</li>
+              <li>Hold keeps one piece aside. You can swap once per piece.</li>
+              <li>In Drift, the drum turns one column on a timer that speeds up each level. It turns right on odd levels and left on even ones, and carries your piece if it would collide.</li>
+              <li>Piece colours are spaced by the golden angle, 137.5° around the colour wheel, so no two neighbouring shapes look alike.</li>
+            </ul>
+          </section>
+          <section>
+            <h3>Scoring</h3>
+            <table>
+              <thead><tr><th>Rings at once</th><th>T(k)</th><th>× 100 × level</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>1</td><td>100</td></tr>
+                <tr><td>2</td><td>3</td><td>300</td></tr>
+                <tr><td>3</td><td>6</td><td>600</td></tr>
+                <tr><td>4</td><td>10</td><td>1,000</td></tr>
+                <tr><td>5, pentominoes only</td><td>15</td><td>1,500</td></tr>
+              </tbody>
+            </table>
+          </section>
+          <section>
+            <h3>Controls</h3>
+            <div class="keys">
+              <span><kbd>←</kbd> <kbd>→</kbd></span><span>Turn the drum</span>
+              <span><kbd>↑</kbd> or <kbd>X</kbd></span><span>Rotate clockwise</span>
+              <span><kbd>Z</kbd></span><span>Rotate anticlockwise</span>
+              <span><kbd>C</kbd> or <kbd>Shift</kbd></span><span>Hold or swap</span>
+              <span><kbd>↓</kbd></span><span>Soft drop, 1 point per row</span>
+              <span><kbd>Space</kbd></span><span>Hard drop, 2 points per row</span>
+              <span><kbd>P</kbd></span><span>Pause</span>
+            </div>
+          </section>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const W = 12, H = 16, TAU = Math.PI * 2;
+  const K = 0.38, TILT = 0.17, TOPPAD = 34, BOTPAD = 34;
+  const mod = (a, n) => ((a % n) + n) % n;
+  const wrapd = a => mod(a + W / 2, W) - W / 2;
+  const ease = p => 1 - Math.pow(1 - p, 3);
+  const $ = id => document.getElementById(id);
+
+  // ---------- Polyomino generation (one-sided)
+  const norm = cells => {
+    const mx = Math.min(...cells.map(c => c[0])), my = Math.min(...cells.map(c => c[1]));
+    return cells.map(([x, y]) => [x - mx, y - my]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  };
+  const keyOf = cells => cells.map(p => p.join(',')).join(';');
+  const rot = cells => cells.map(([x, y]) => [-y, x]);
+  const canon = cells => {
+    let best = null, c = cells;
+    for (let r = 0; r < 4; r++) { c = rot(c); const n = norm(c), k = keyOf(n); if (!best || k < best.k) best = { k, n }; }
+    return best;
+  };
+  function generate(n) {
+    let cur = new Map([['0,0', [[0, 0]]]]);
+    for (let s = 2; s <= n; s++) {
+      const nx = new Map();
+      for (const sh of cur.values()) {
+        const set = new Set(sh.map(p => p + ''));
+        for (const [x, y] of sh) for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const q = [x + dx, y + dy];
+          if (set.has(q + '')) continue;
+          const c = canon([...sh, q]);
+          if (!nx.has(c.k)) nx.set(c.k, c.n);
+        }
+      }
+      cur = nx;
+    }
+    return [...cur.values()].sort((a, b) => keyOf(a) < keyOf(b) ? -1 : 1);
+  }
+  const SHAPES = {};
+  let hueIndex = 0;
+  for (const o of [3, 4, 5]) {
+    SHAPES[o] = generate(o).map(base => {
+      const rots = []; let c = base;
+      for (let r = 0; r < 4; r++) { const n = norm(c); rots.push({ cells: n, w: Math.max(...n.map(p => p[0])) + 1, h: Math.max(...n.map(p => p[1])) + 1 }); c = rot(c); }
+      return { rots, hue: Math.round((hueIndex++ * 137.508 + 210) % 360) };
+    });
+  }
+  const NAMES = { 3: 'trominoes', 4: 'tetrominoes', 5: 'pentominoes' };
+  const orderFor = lines => lines < 8 ? 3 : lines < 30 ? 4 : 5;
+
+  // ---------- State
+  let grid, cur = null, queue, bags, score, lines, level, state = 'ready';
+  let camX = 6, dropAcc = 0, lockAcc = 0, lockResets = 0;
+  let mode = 'classic', held = null, canHold = true, driftAcc = 0, driftAnim = 0, driftAnimDir = 1;
+  let rings = [], fall = null, ledger = [];
+  const bestKey = m => 'cylindrix-best-' + m;
+  const getBest = m => { try { return +localStorage.getItem(bestKey(m)) || 0; } catch (e) { return 0; } };
+  const driftInterval = () => Math.max(900, 4000 * Math.pow(0.9, level - 1));
+  const driftDir = () => level % 2 ? 1 : -1;
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  function fromBag(o) { if (!bags[o] || !bags[o].length) bags[o] = shuffle([...SHAPES[o].keys()]); return { o, i: bags[o].pop() }; }
+  function fillQueue() { while (queue.length < 3) queue.push(fromBag(orderFor(lines))); }
+  const shapeOf = p => SHAPES[p.o][p.i];
+  const rotOf = p => shapeOf(p).rots[p.r];
+  const cellsOf = p => rotOf(p).cells.map(([x, y]) => [mod(p.x + x, W), p.y + y]);
+  const fits = p => cellsOf(p).every(([x, y]) => y < H && (y < 0 || !grid[y][x]));
+  const emptyGrid = () => Array.from({ length: H }, () => Array(W).fill(null));
+
+  function demoGrid() {
+    const g = emptyGrid(); let seed = 11;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const hues = [...SHAPES[4], ...SHAPES[5]].map(s => s.hue);
+    for (let y = H - 7; y < H; y++) {
+      const fill = 0.42 + (y - (H - 7)) * 0.08;
+      for (let x = 0; x < W; x++) if (rnd() < fill) g[y][x] = hues[Math.floor(rnd() * hues.length)];
+    }
+    return g;
+  }
+
+  function newGame(m) {
+    if (m) mode = m;
+    grid = emptyGrid(); queue = []; bags = {}; score = 0; lines = 0; level = 1;
+    held = null; canHold = true; driftAcc = 0; driftAnim = 0; rings = []; fall = null; ledger = [];
+    demo = null; demoDrift = false; $('demo-bar').hidden = true;
+    $('drift-box').hidden = mode !== 'drift';
+    fillQueue(); state = 'play'; spawn(); showOverlay(null);
+    setFormula(null); renderLedger(); updateHUD(); drawHold();
+  }
+
+  function spawn(fromHold) {
+    const item = fromHold || queue.shift(); fillQueue();
+    const r = SHAPES[item.o][item.i].rots[0];
+    cur = { o: item.o, i: item.i, r: 0, x: mod(Math.round(camX - r.w / 2), W), y: 0 };
+    dropAcc = 0; lockAcc = 0; lockResets = 0;
+    if (!fits(cur)) gameOver();
+    drawNext();
+  }
+
+  const grounded = () => !fits({ ...cur, y: cur.y + 1 });
+  function afterShift() { if (grounded() && lockResets < 15) { lockAcc = 0; lockResets++; } }
+  function move(dx) { const p = { ...cur, x: mod(cur.x + dx, W) }; if (fits(p)) { cur = p; afterShift(); } }
+  function rotate(dir) {
+    const o = rotOf(cur), r = mod(cur.r + dir, 4), n = shapeOf(cur).rots[r];
+    const bx = cur.x + Math.round((o.w - n.w) / 2), by = cur.y + Math.round((o.h - n.h) / 2);
+    for (const [kx, ky] of [[0,0],[1,0],[-1,0],[0,-1],[2,0],[-2,0],[0,-2]]) {
+      const p = { ...cur, r, x: mod(bx + kx, W), y: by + ky };
+      if (fits(p)) { cur = p; afterShift(); return; }
+    }
+  }
+  function softDrop() {
+    const p = { ...cur, y: cur.y + 1 };
+    if (fits(p)) { cur = p; score += 1; dropAcc = 0; updateHUD(); } else lockAcc = 1e9;
+  }
+  function hardDrop() { while (fits({ ...cur, y: cur.y + 1 })) { cur.y++; score += 2; } lock(); }
+  function hold() {
+    if (!canHold) return;
+    const item = { o: cur.o, i: cur.i };
+    if (held) { const h = held; held = item; spawn(h); } else { held = item; spawn(); }
+    canHold = false; drawHold();
+  }
+  function driftStep() {
+    const d = driftDir();
+    grid = grid.map(row => row.map((_, x) => row[mod(x - d, W)]));
+    if (!fits(cur)) { const p = { ...cur, x: mod(cur.x + d, W) }; if (fits(p)) cur = p; }
+    if (demo && demo.plan) demo.plan.x = mod(demo.plan.x + d, W);
+    driftAnim = reduceMotion() ? 0 : 1; driftAnimDir = d;
+  }
+
+  // ---------- Demo: the game plays itself for 30 seconds and explains each rule
+  let demo = null, demoDrift = false;
+  const DEMO_LEN = 30000;
+  const CAPS = [
+    [0, 'The piece falls at the front of the drum.'],
+    [3500, 'Pressing ← or → turns the drum, so the stack slides under the piece.'],
+    [8000, 'The dashed outline shows exactly where the piece will land.'],
+    [12000, 'Fill all 12 cells of a ring, all the way round, to clear it.'],
+    [16000, 'Faded blocks are on the back of the drum, seen through the glass.'],
+    [19500, 'C puts a piece in the Hold box to use later.'],
+    [23000, 'In Drift mode, the drum also turns itself on a timer.'],
+    [27500, 'Your turn. Pick a mode to start.']
+  ];
+  function demoSeed() {
+    const g = emptyGrid(), hues = SHAPES[4].map(s => s.hue);
+    const gaps = [[2, 3], [2, 3], [7], [7, 8, 9], [0, 11]];
+    gaps.forEach((gap, j) => {
+      const y = H - 1 - j;
+      for (let x = 0; x < W; x++) if (!gap.includes(x)) g[y][x] = hues[(x * 3 + j * 5) % hues.length];
+    });
+    return g;
+  }
+  function evaluateBoard(g, cleared) {
+    let agg = 0, holes = 0, bump = 0; const h = [];
+    for (let x = 0; x < W; x++) {
+      let y = 0; while (y < H && g[y][x] === null) y++;
+      h[x] = H - y; agg += h[x];
+      for (let yy = y + 1; yy < H; yy++) if (g[yy][x] === null) holes++;
+    }
+    for (let x = 0; x < W; x++) bump += Math.abs(h[x] - h[(x + 1) % W]);
+    return cleared * 3 - agg * 0.51 - holes * 0.9 - bump * 0.18;
+  }
+  function planMove() {
+    let best = null;
+    for (let r = 0; r < 4; r++) for (let x = 0; x < W; x++) {
+      let q = { ...cur, r, x };
+      if (!fits(q)) continue;
+      while (fits({ ...q, y: q.y + 1 })) q.y++;
+      const cells = cellsOf(q); if (cells.some(([, y]) => y < 0)) continue;
+      const g = grid.map(row => row.slice());
+      for (const [cx2, cy2] of cells) g[cy2][cx2] = 1;
+      const keep = g.filter(row => !row.every(v => v !== null)), cleared = H - keep.length;
+      while (keep.length < H) keep.unshift(Array(W).fill(null));
+      const score2 = evaluateBoard(keep, cleared) - Math.abs(wrapd(x - cur.x)) * 0.01;
+      if (!best || score2 > best.s) best = { s: score2, r, x };
+    }
+    return best;
+  }
+  function showKey(k, what) { $('demo-key').innerHTML = `<kbd>${k}</kbd> ${what}`; }
+  function startDemo() {
+    mode = 'classic'; grid = demoSeed(); queue = []; bags = {}; score = 0; lines = 8; level = 1;
+    held = null; canHold = true; ledger = []; rings = []; fall = null; demoDrift = false; driftAcc = 0;
+    fillQueue(); state = 'demo';
+    demo = { t: 0, plan: null, wait: 600, moves: 0, tries: 0, held: false, step: -1 };
+    spawn(); showOverlay(null);
+    $('demo-bar').hidden = false; $('drift-box').hidden = true; $('demo-key').textContent = '';
+    renderLedger(); setFormula(null); updateHUD(); drawHold();
+    $('wrap').scrollIntoView({ block: 'nearest', behavior: reduceMotion() ? 'auto' : 'smooth' });
+  }
+  function endDemo() {
+    state = 'ready'; demo = null; demoDrift = false;
+    $('demo-bar').hidden = true; $('drift-box').hidden = true;
+    grid = demoGrid(); cur = null; score = 0; lines = 0; level = 1; held = null; canHold = true;
+    ledger = []; queue = []; bags = {}; fillQueue();
+    renderLedger(); setFormula(null); updateHUD(); drawNext(); drawHold(); showOverlay('ov-ready');
+  }
+  function demoTick(dt) {
+    demo.t += dt;
+    if (demo.t >= DEMO_LEN) { endDemo(); return; }
+    let i = 0; while (i + 1 < CAPS.length && CAPS[i + 1][0] <= demo.t) i++;
+    if (i !== demo.step) { demo.step = i; $('demo-cap').textContent = CAPS[i][1]; $('demo-step').textContent = `Demo · step ${i + 1} of ${CAPS.length}`; }
+    $('demo-meter').style.width = (100 * demo.t / DEMO_LEN).toFixed(1) + '%';
+    if (demo.t >= 23000 && !demoDrift) { demoDrift = true; driftAcc = 0; $('drift-box').hidden = false; }
+    if (demo.t >= 27500) return; // let the last caption breathe
+    demo.wait -= dt; if (demo.wait > 0) return;
+    if (demo.t >= 19500 && !demo.held && canHold) {
+      demo.held = true; showKey('C', 'hold'); hold(); demo.plan = null; demo.wait = 700; return;
+    }
+    if (!demo.plan) demo.plan = planMove();
+    const p = demo.plan;
+    if (p && cur.r !== p.r && demo.tries < 6) {
+      rotate(1); demo.tries++; showKey('↑', 'rotate'); demo.wait = 220; return;
+    }
+    const dx = p ? wrapd(p.x - cur.x) : 0;
+    if (dx !== 0 && demo.moves < 14) {
+      const ox = cur.x; move(Math.sign(dx)); demo.moves++;
+      if (cur.x === ox) demo.moves = 99;
+      showKey(dx > 0 ? '→' : '←', 'turn the drum'); demo.wait = 180; return;
+    }
+    showKey('Space', 'drop'); demo.plan = null; demo.moves = 0; demo.tries = 0; demo.wait = 650;
+    hardDrop();
+  }
+
+  function lock() {
+    const cells = cellsOf(cur), hue = shapeOf(cur).hue;
+    if (cells.some(([, y]) => y < 0)) { gameOver(); return; }
+    for (const [x, y] of cells) grid[y][x] = hue;
+    const full = [];
+    for (let y = 0; y < H; y++) if (grid[y].every(v => v !== null)) full.push(y);
+    if (full.length) {
+      const before = orderFor(lines), now = performance.now(), lv = level, k = full.length;
+      // rings fly off the drum
+      if (!reduceMotion()) full.forEach((y, j) => rings.push({ y, hues: grid[y].slice(), t: now + j * 45, dir: j % 2 ? -1 : 1 }));
+      // rows above fall into place
+      const off = [];
+      const kept = [];
+      for (let y = 0; y < H; y++) if (!full.includes(y)) kept.push(y);
+      const newGrid = emptyGrid().slice(0, H - kept.length);
+      kept.forEach(oy => newGrid.push(grid[oy]));
+      for (let ny = 0; ny < H; ny++) {
+        const idx = ny - (H - kept.length);
+        off[ny] = idx >= 0 ? ny - kept[idx] : 0;
+      }
+      grid = newGrid;
+      if (!reduceMotion()) fall = { off, t: now };
+      const t = k * (k + 1) / 2, pts = t * 100 * lv;
+      score += pts; lines += k; level = 1 + Math.floor(lines / 10);
+      setFormula({ k, t, lv, pts });
+      ledger.unshift({ text: `T(${k}) · 100 · ${lv}`, pts }); ledger = ledger.slice(0, 6); renderLedger();
+      const after = orderFor(lines);
+      if (after !== before) toast(`n = ${after}: ${SHAPES[after].length} ${NAMES[after]} arrive`);
+      else if (level !== lv) toast(mode === 'drift' ? `level ${level}: drum reverses` : `level ${level}`);
+    }
+    canHold = true; updateHUD(); spawn(); drawHold();
+  }
+
+  function gameOver() {
+    if (state === 'demo') { endDemo(); return; }
+    state = 'over';
+    let best = getBest(mode);
+    if (score > best) { best = score; try { localStorage.setItem(bestKey(mode), best); } catch (e) {} }
+    $('final').textContent = score.toLocaleString();
+    $('best-line').textContent = (mode === 'drift' ? 'Drift' : 'Classic') + ' best: ' + best.toLocaleString();
+    showOverlay('ov-over');
+  }
+
+  // ---------- HUD
+  function showOverlay(id) { for (const o of ['ov-ready', 'ov-pause', 'ov-over']) $(o).hidden = o !== id; }
+  function updateHUD() {
+    $('s-score').textContent = score.toLocaleString();
+    $('s-lines').textContent = lines; $('s-level').textContent = level;
+    const o = orderFor(lines);
+    document.querySelectorAll('#orders span').forEach(s => s.classList.toggle('on', +s.dataset.o === o));
+    $('drift-dir').textContent = driftDir() > 0 ? 'turning right →' : '← turning left';
+    $('drift-rate').textContent = 'every ' + (driftInterval() / 1000).toFixed(1) + ' s';
+    if ($('formula').classList.contains('idle')) $('formula').textContent = `T(k) × 100 × ${level}`;
+  }
+  let formulaTimer;
+  function setFormula(f) {
+    const el = $('formula');
+    clearTimeout(formulaTimer);
+    if (!f) { el.classList.add('idle'); el.textContent = `T(k) × 100 × ${level}`; return; }
+    el.classList.remove('idle');
+    el.textContent = `T(${f.k}) × 100 × ${f.lv} = ${f.pts.toLocaleString()}`;
+    formulaTimer = setTimeout(() => setFormula(null), 2600);
+  }
+  function renderLedger() {
+    const ol = $('ledger'); ol.textContent = '';
+    if (!ledger.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'Clears are written here.'; ol.appendChild(li); return; }
+    for (const e of ledger) {
+      const li = document.createElement('li');
+      const a = document.createElement('span'); a.textContent = e.text;
+      const b = document.createElement('b'); b.textContent = '+' + e.pts.toLocaleString();
+      li.append(a, b); ol.appendChild(li);
+    }
+  }
+  let toastTimer;
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.opacity = 0, 2000); }
+
+  // hand-ruled underlines
+  function rule(el) {
+    let d = 'M0 3', x = 0, seed = el.textContent.length * 7 + 3;
+    const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+    while (x < 300) { x += 20 + rnd() * 25; d += ` Q${(x - 10).toFixed(1)} ${(3 + (rnd() - 0.5) * 3).toFixed(2)} ${Math.min(300, x).toFixed(1)} ${(3 + (rnd() - 0.5) * 1.6).toFixed(2)}`; }
+    el.insertAdjacentHTML('beforeend', `<svg class="rule" viewBox="0 0 300 6" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" vector-effect="non-scaling-stroke" stroke-linecap="round"/></svg>`);
+  }
+  document.querySelectorAll('.ruled').forEach(rule);
+
+  // ---------- Tokens
+  let C = {};
+  function readTokens() {
+    const s = getComputedStyle(document.documentElement);
+    for (const k of ['ink', 'ink-soft', 'red', 'drum', 'paper', 'paper-card', 'shade-rgb', 'hi-rgb', 'cell-fs', 'cell-fl', 'cell-ls', 'cell-ll']) C[k] = s.getPropertyValue('--' + k).trim();
+  }
+  readTokens();
+  const refreshTheme = () => { readTokens(); drawNext(); drawHold(); };
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', refreshTheme);
+  new MutationObserver(refreshTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  const fill = (h, a = 1) => `hsla(${h}, ${C['cell-fs']}, ${C['cell-fl']}, ${a})`;
+  const line = (h, a = 1) => `hsla(${h}, ${C['cell-ls']}, ${C['cell-ll']}, ${a})`;
+  const shade = a => `rgba(${C['shade-rgb']}, ${a})`;
+  const hi = a => `rgba(${C['hi-rgb']}, ${a})`;
+
+  // ---------- Drum geometry
+  const cv = $('board'), ctx = cv.getContext('2d');
+  let dpr = 1, R = 80, cs = 34, b = 14, cx = 140, top = 50, cw = 280, ch = 700;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const narrow = window.innerWidth < 760;
+    const availW = Math.min($('wrap').parentElement.clientWidth || 300, 480);
+    const availH = narrow ? Math.max(380, window.innerHeight - 330) : Math.min(760, Math.max(460, window.innerHeight - 120));
+    R = (availH - TOPPAD - BOTPAD) / (H * K + 2 * TILT);
+    R = Math.max(60, Math.min(R, availW / 3.3));
+    cs = R * K; b = R * TILT;
+    cw = Math.round(R * 3.3); ch = Math.round(TOPPAD + 2 * b + H * cs + BOTPAD);
+    cx = cw / 2; top = TOPPAD + b;
+    cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // a point on the drum surface: column coordinate (fractional), row coordinate (fractional)
+  function P(col, row, rad = R, spin = 0) {
+    const f = (col - camX) * TAU / W + spin;
+    return [cx + rad * Math.sin(f), top + row * cs + b * (rad / R) * Math.cos(f), Math.cos(f)];
+  }
+  function cellPath(col, row, ins = 0.06, rad = R, spin = 0, hRows = 1) {
+    const n = 4, pts = [];
+    for (let i = 0; i <= n; i++) pts.push(P(col + ins + (1 - 2 * ins) * i / n, row + ins, rad, spin));
+    for (let i = n; i >= 0; i--) pts.push(P(col + ins + (1 - 2 * ins) * i / n, row + hRows - ins, rad, spin));
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+  }
+  const facing = (col, spin = 0) => Math.cos((col + 0.5 - camX) * TAU / W + spin);
+
+  function inkCell(col, row, hue, kind, alpha = 1) {
+    cellPath(col, row);
+    if (kind === 'ghost') {
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = line(hue, 0.75 * alpha); ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]);
+      return;
+    }
+    ctx.fillStyle = fill(hue, 0.9 * alpha); ctx.fill();
+    ctx.strokeStyle = line(hue, alpha); ctx.lineWidth = kind === 'active' ? 2.2 : 1.4; ctx.stroke();
+    if (kind === 'active') { cellPath(col, row, 0.26); ctx.strokeStyle = line(hue, 0.55 * alpha); ctx.lineWidth = 1; ctx.stroke(); }
+  }
+
+  function drumBodyPath() {
+    const bot = top + H * cs, steps = 36;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) { const f = -Math.PI / 2 + Math.PI * i / steps; const x = cx + R * Math.sin(f), y = top + b * Math.cos(f); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    for (let i = steps; i >= 0; i--) { const f = -Math.PI / 2 + Math.PI * i / steps; ctx.lineTo(cx + R * Math.sin(f), bot + b * Math.cos(f)); }
+    ctx.closePath();
+  }
+  function ellipseHalf(yc, front, rad = R, bb = b) {
+    const steps = 36; ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const f = (front ? -Math.PI / 2 : Math.PI / 2) + Math.PI * i / steps;
+      const x = cx + rad * Math.sin(f), y = yc + bb * Math.cos(f);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+  }
+
+  function draw(now) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    const bot = top + H * cs;
+
+    // row offsets for the falling-in animation
+    let fallP = 1;
+    if (fall) { fallP = Math.min(1, (now - fall.t) / 220); if (fallP >= 1) fall = null; }
+    const rowOf = y => fall ? y - fall.off[y] * (1 - ease(fallP)) : y;
+    const colShift = -driftAnimDir * driftAnim;
+
+    // active + ghost cells
+    const active = [], ghost = [];
+    if (state !== 'ready' && cur) {
+      let g = { ...cur }; while (fits({ ...g, y: g.y + 1 })) g.y++;
+      const occ = new Set(cellsOf(cur).map(c => c + ''));
+      for (const c of cellsOf(g)) if (!occ.has(c + '')) ghost.push(c);
+      for (const c of cellsOf(cur)) active.push(c);
+    }
+    const hue = cur ? shapeOf(cur).hue : 0;
+
+    // floor shadow
+    ctx.fillStyle = shade(0.08);
+    ctx.beginPath(); ctx.ellipse(cx + 4, bot + b * 0.5 + 6, R * 1.05, b * 1.2, 0, 0, TAU); ctx.fill();
+
+    // back half, seen through the glass (mirrored automatically by the projection)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (grid[y][x] === null) continue;
+      if (facing(x + colShift) > 0) continue;
+      inkCell(x + colShift, rowOf(y), grid[y][x], 'solid', 0.26);
+    }
+    for (const [x, y] of active) if (facing(x) <= 0) inkCell(x, y, hue, 'solid', 0.3);
+    // back rims
+    ctx.setLineDash([2, 4]); ctx.strokeStyle = C['ink-soft']; ctx.lineWidth = 1;
+    ellipseHalf(bot, false); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // glass front
+    drumBodyPath(); ctx.fillStyle = C.drum; ctx.globalAlpha = 0.68; ctx.fill(); ctx.globalAlpha = 1;
+
+    // ruled grid on the front face
+    ctx.save(); drumBodyPath(); ctx.clip();
+    ctx.strokeStyle = shade(0.16); ctx.lineWidth = 1;
+    for (let c = 0; c < W; c++) {
+      const e = c + colShift, f = (e - camX) * TAU / W;
+      if (Math.cos(f) <= 0) continue;
+      const x = cx + R * Math.sin(f);
+      ctx.beginPath(); ctx.moveTo(x, top + b * Math.cos(f)); ctx.lineTo(x, bot + b * Math.cos(f)); ctx.stroke();
+    }
+    for (let r = 0; r <= H; r++) { ellipseHalf(top + r * cs, true); ctx.stroke(); }
+    // the seam is the drum's margin line
+    { const f = (0 + colShift - camX) * TAU / W; if (Math.cos(f) > 0) {
+      const x = cx + R * Math.sin(f); ctx.strokeStyle = C.red; ctx.globalAlpha = 0.25 + 0.6 * Math.cos(f); ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(x, top + b * Math.cos(f)); ctx.lineTo(x, bot + b * Math.cos(f)); ctx.stroke(); ctx.globalAlpha = 1; } }
+    ctx.restore();
+
+    // front cells
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (grid[y][x] === null || facing(x + colShift) <= 0) continue;
+      inkCell(x + colShift, rowOf(y), grid[y][x], 'solid');
+    }
+    for (const [x, y] of ghost) if (facing(x) > 0) inkCell(x, y, hue, 'ghost');
+    for (const [x, y] of active) if (facing(x) > 0) inkCell(x, y, hue, 'active');
+
+    // light: dark at the flanks, a highlight down the front
+    ctx.save(); drumBodyPath(); ctx.clip();
+    let g = ctx.createLinearGradient(cx - R, 0, cx + R, 0);
+    g.addColorStop(0, shade(0.42)); g.addColorStop(0.22, shade(0.1)); g.addColorStop(0.5, shade(0));
+    g.addColorStop(0.8, shade(0.14)); g.addColorStop(1, shade(0.5));
+    ctx.fillStyle = g; ctx.fillRect(cx - R, 0, 2 * R, ch);
+    g = ctx.createLinearGradient(cx - R * 0.5, 0, cx - R * 0.12, 0);
+    g.addColorStop(0, hi(0)); g.addColorStop(0.5, hi(0.32)); g.addColorStop(1, hi(0));
+    ctx.fillStyle = g; ctx.fillRect(cx - R * 0.5, 0, R * 0.38, ch);
+    ctx.restore();
+
+    // outlines
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(cx, top, R, b, 0, 0, TAU); ctx.stroke();
+    ellipseHalf(bot, true); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - R, top); ctx.lineTo(cx - R, bot); ctx.moveTo(cx + R, top); ctx.lineTo(cx + R, bot); ctx.stroke();
+
+    // column numbers around the base
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let c = 0; c < W; c++) {
+      const f = (c + 0.5 + colShift - camX) * TAU / W, k = Math.cos(f);
+      if (k < -0.35) continue;
+      const x = cx + R * 1.12 * Math.sin(f), y = bot + b * Math.cos(f) + 13 + 4 * k;
+      ctx.globalAlpha = 0.22 + 0.78 * Math.max(0, k);
+      ctx.fillStyle = c === 0 ? C.red : C['ink-soft'];
+      ctx.font = `${c === 0 ? 600 : 400} ${Math.round(9 + 4 * Math.max(0, k))}px "JetBrains Mono", monospace`;
+      ctx.fillText(String(c), x, y);
+    }
+    ctx.globalAlpha = 1;
+
+    // annotation
+    ctx.fillStyle = C['ink-soft']; ctx.font = `17px "Kalam", cursive`;
+    const note = (mode === 'drift' && state === 'play') || demoDrift ? (driftDir() > 0 ? 'drum turning →' : '← drum turning') : '12 columns, 30° apart';
+    ctx.fillText(note, cx, top - b - 14);
+
+    // rings spinning off
+    rings = rings.filter(rg => now - rg.t < 760);
+    for (const rg of rings) {
+      const p = Math.max(0, (now - rg.t) / 760), e = ease(p);
+      const rad = R * (1 + 0.7 * e), spin = rg.dir * e * Math.PI * 1.1, rowY = rg.y - 1.6 * e;
+      const a = 1 - p;
+      const order = [...rg.hues.keys()].sort((i, j) => facing(i, spin) - facing(j, spin));
+      for (const x of order) {
+        const h = rg.hues[x]; if (h === null) continue;
+        const k = facing(x, spin);
+        cellPath(x, rowY, 0.08, rad, spin, 1 - 0.3 * e);
+        ctx.fillStyle = fill(h, (k > 0 ? 0.9 : 0.3) * a); ctx.fill();
+        ctx.strokeStyle = line(h, (k > 0 ? 1 : 0.35) * a); ctx.lineWidth = 1.4; ctx.stroke();
+      }
+      ctx.strokeStyle = C.red; ctx.globalAlpha = a * 0.8; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(cx, top + (rowY + 0.5) * cs, rad * 1.04, b * (rad / R) * 1.04, 0, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- Hold and next previews
+  const nextCv = [0, 1, 2].map(() => { const c = document.createElement('canvas'); c.className = 'mini'; $('next').appendChild(c); return c; });
+  function drawMini(c, q) {
+    const s = 12, size = 6 * s, d = window.devicePixelRatio || 1;
+    c.width = size * d; c.height = size * d; c.style.width = size + 'px'; c.style.height = size + 'px';
+    const x = c.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, size, size);
+    if (!q) return;
+    const sh = SHAPES[q.o][q.i], r = sh.rots[0];
+    const ox = (size - r.w * s) / 2, oy = (size - r.h * s) / 2;
+    for (const [cx2, cy2] of r.cells) {
+      x.fillStyle = fill(sh.hue, 0.9); x.fillRect(ox + cx2 * s + 1, oy + cy2 * s + 1, s - 2, s - 2);
+      x.strokeStyle = line(sh.hue); x.lineWidth = 1.2; x.strokeRect(ox + cx2 * s + 1.5, oy + cy2 * s + 1.5, s - 3, s - 3);
+    }
+  }
+  function drawNext() { if (queue) nextCv.forEach((c, i) => drawMini(c, queue[i])); }
+  function drawHold() { const h = $('hold'); drawMini(h, held); h.classList.toggle('used', !canHold); }
+
+  // ---------- Loop
+  let last = performance.now();
+  function frame(t) {
+    const dt = Math.min(100, t - last); last = t;
+    if (state === 'play' || state === 'demo') {
+      const r = rotOf(cur), target = cur.x + r.w / 2;
+      camX = mod(camX + wrapd(target - camX) * Math.min(1, dt / 70), W);
+      dropAcc += dt;
+      const g = Math.max(55, 850 * Math.pow(0.86, level - 1));
+      while (dropAcc >= g) { dropAcc -= g; const p = { ...cur, y: cur.y + 1 }; if (fits(p)) { cur = p; lockAcc = 0; } else break; }
+      if (grounded()) { lockAcc += dt; if (lockAcc > 500) lock(); }
+      if ((state === 'play' && mode === 'drift') || (state === 'demo' && demoDrift)) {
+        driftAcc += dt; const iv = state === 'demo' ? 1600 : driftInterval();
+        if (driftAcc >= iv) { driftAcc -= iv; driftStep(); }
+        $('drift-meter').style.width = (100 * driftAcc / iv).toFixed(1) + '%';
+      }
+      if (state === 'demo') demoTick(dt);
+    } else if (state === 'ready') {
+      if (!reduceMotion()) camX = mod(camX + dt * 0.0011, W);
+    }
+    driftAnim = Math.max(0, driftAnim - dt / 160);
+    draw(t);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Input
+  function act(a) {
+    if (state !== 'play') return;
+    ({ left: () => move(-1), right: () => move(1), cw: () => rotate(1), ccw: () => rotate(-1), down: softDrop, drop: hardDrop, hold })[a]();
+  }
+  function pause(on) {
+    if (on && state === 'play') { state = 'pause'; showOverlay('ov-pause'); }
+    else if (!on && state === 'pause') { state = 'play'; showOverlay(null); last = performance.now(); }
+  }
+  document.addEventListener('keydown', e => {
+    const k = e.key;
+    const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'cw', x: 'cw', X: 'cw', z: 'ccw', Z: 'ccw', ArrowDown: 'down', ' ': 'drop', c: 'hold', C: 'hold', Shift: 'hold' };
+    if (state === 'demo') { if (k === 'Escape') endDemo(); return; }
+    if (state === 'play' && map[k]) { e.preventDefault(); if (k === ' ' && e.repeat) return; act(map[k]); }
+    else if (k === 'p' || k === 'P' || k === 'Escape') pause(state === 'play');
+    else if (k === 'Enter' && (state === 'ready' || state === 'over')) newGame();
+  });
+  window.addEventListener('blur', () => pause(true));
+  document.querySelectorAll('#pad button').forEach(btn => {
+    let t1, t2;
+    const stop = () => { clearTimeout(t1); clearInterval(t2); };
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault(); const a = btn.dataset.act; act(a);
+      if (['left', 'right', 'down'].includes(a)) t1 = setTimeout(() => t2 = setInterval(() => act(a), 70), 170);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, stop));
+  });
+  $('btn-classic').onclick = () => newGame('classic');
+  $('btn-drift').onclick = () => newGame('drift');
+  $('btn-again').onclick = () => newGame();
+  $('btn-mode').onclick = () => { state = 'ready'; grid = demoGrid(); cur = null; showOverlay('ov-ready'); };
+  $('btn-resume').onclick = () => pause(false);
+  $('btn-demo').onclick = startDemo;
+  $('btn-demo2').onclick = () => { if (state === 'ready' || state === 'over') startDemo(); };
+  $('btn-stop').onclick = endDemo;
+
+  // ---------- Resting state: a sample stack turning slowly
+  grid = demoGrid(); queue = []; bags = {}; score = 0; lines = 0; level = 1;
+  fillQueue(); updateHUD(); drawNext(); drawHold();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => {});
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
